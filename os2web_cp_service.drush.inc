@@ -16,7 +16,7 @@ function os2web_cp_service_drush_command() {
     'aliases' => array('cp-up'),
   );
   $items['cp-cleanup'] = array(
-    'description' => 'Delete all refenreces which are broken to a Stub.',
+    'description' => 'Delete all documents with a broken reference.',
     'arguments' => array(),
     'aliases' => array('cp-cl'),
   );
@@ -64,17 +64,17 @@ function drush_os2web_cp_service_cp_update_ref() {
  */
 function drush_os2web_cp_service_cp_cleanup() {
 
+  // Find all documents which has no references from a case.
   $nodes = db_query("SELECT *
-            FROM node n
-            WHERE n.type =  'os2web_cp_service_cp_document'
-            AND n.title =  'Stub'
-            AND n.nid IN (
-              SELECT field_os2web_cp_service_doc_ref_target_id
-              FROM field_data_field_os2web_cp_service_doc_ref
-            )");
+                     FROM node n
+                     WHERE n.type =  'os2web_cp_service_cp_document'
+                     AND n.nid NOT IN (
+                       SELECT field_os2web_cp_service_doc_ref_target_id
+                       FROM field_data_field_os2web_cp_service_doc_ref
+                     )");
 
   foreach ($nodes as $node) {
     node_delete($node->nid);
-    drush_log(t('Deleted stub: :node', array(':node' => $node->nid)), 'success');
+    drush_log(t('Deleted document: !node', array('!node' => $node->nid)), 'success');
   }
 }

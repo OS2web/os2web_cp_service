@@ -73,6 +73,9 @@ function os2web_gf_service_handler($file_id) {
     'application/vnd.ms-outlook',
   );
 
+  $disallowed_mimes = array_merge($disallowed_mimes, explode(',', variable_get('os2web_cp_service_disallow_mimes', '')));
+  $case_exceptions = explode(',', variable_get('os2web_cp_service_disallow_mimes_exceptions', ''));
+
   if ($url = variable_get('os2web_cp_service_cp_document_fileurl')) {
 
     $username = variable_get('os2web_cp_service_endpoint_user');
@@ -87,7 +90,22 @@ function os2web_gf_service_handler($file_id) {
       $header = curl_getinfo($ch);
       curl_close($ch);
       if ($header['http_code'] === 200) {
-        if (!in_array($header['content_type'], $disallowed_mimes)) {
+        // Load the title to use it as the filename, and for conditions.
+        $query = new EntityFieldQuery();
+        $result = $query
+            ->entityCondition('entity_type', 'node')
+            ->propertyCondition('type', 'os2web_cp_service_cp_document')
+            ->propertyCondition('status', 1)
+            ->fieldCondition('field_os2web_cp_service_file_id', 'value', $file_id, '=')
+            ->execute();
+        $nids = (isset($result['node']))?array_keys($result['node']) : NULL;
+
+        $node = node_load(array_pop($nids));
+        $case_id = NULL;
+        if ($node) {
+          $case_id = $node->field_os2web_cp_service_case_id[LANGUAGE_NONE][0]['value'];
+        }
+        if (!in_array($header['content_type'], $disallowed_mimes) || ($case_id && in_array($case_id, $case_exceptions))) {
           drupal_add_http_header('Content-Type', $header['content_type']);
           drupal_add_http_header('Content-Length', $header['download_content_length']);
           drupal_add_http_header('Cache-Control', 'must-revalidate, post-check=0, pre-check=0');
@@ -103,22 +121,12 @@ function os2web_gf_service_handler($file_id) {
             drupal_add_http_header('Pragma', 'no-cache');
           }
 
-          // Load the title to use it as the filename.
-          $query = new EntityFieldQuery();
-          $result = $query
-              ->entityCondition('entity_type', 'node')
-              ->propertyCondition('type', 'os2web_cp_service_cp_document')
-              ->propertyCondition('status', 1)
-              ->fieldCondition('field_os2web_cp_service_file_id', 'value', $file_id, '=')
-              ->execute();
-          $nids = (isset($result['node']))?array_keys($result['node']) : NULL;
-
-          $node = node_load(array_pop($nids));
-
+          $filename = str_replace('/', '_', $file_id . '.' . os2web_cp_service_get_extension_from_mime($header['content_type']));
           if ($node) {
+            // If we can find the doc in DB, give it a real name.
             $filename = str_replace('/', '_', $node->field_os2web_cp_service_doc_id[LANGUAGE_NONE][0]['value'] . '.' . os2web_cp_service_get_extension_from_mime($header['content_type']));
-            drupal_add_http_header('Content-Disposition', 'attachment; filename=' . $filename);
           }
+          drupal_add_http_header('Content-Disposition', 'attachment; filename=' . $filename);
           echo $data;
           drupal_exit();
         }
@@ -318,13 +326,6 @@ function os2web_cp_service_create_case(array $data) {
   try {
     node_submit($node);
     node_save($node);
-
-    // Trigger a cache reload by calling the URL for the node.
-    $cache_trigger = curl_init(url('sag/' . $node->field_os2web_cp_service_case_id[LANGUAGE_NONE][0]['value'], array('absolute' => TRUE)));
-    // Stop the call after 1 sec. Dont care about the response.
-    curl_setopt($cache_trigger, CURLOPT_TIMEOUT, 1);
-    curl_exec($cache_trigger);
-    curl_close($cache_trigger);
 
     return TRUE;
   }
@@ -643,7 +644,6 @@ function os2web_cp_service_delete($guid) {
   $query = new EntityFieldQuery();
   $result = $query
       ->entityCondition('entity_type', 'node')
-      ->propertyCondition('status', 1)
       ->fieldCondition('field_os2web_cp_service_key', 'value', $guid, '=')
       ->execute();
   $nids = (isset($result['node']))?array_keys($result['node']) : array();
@@ -674,20 +674,21 @@ function os2web_cp_service_node_delete($node) {
     $result = $query
         ->entityCondition('entity_type', 'node')
         ->propertyCondition('type', 'os2web_cp_service_cp_case')
-        ->propertyCondition('status', 1)
         ->fieldCondition('field_os2web_cp_service_doc_ref', 'target_id', $node->nid, '=')
         ->execute();
-    $nids = array_keys($result['node']);
-    $new_nids = array();
-    foreach ($nids as $nid) {
-      $cnode = node_load($nid);
-      foreach ($cnode->field_os2web_cp_service_doc_ref[LANGUAGE_NONE] as $value) {
-        if ($value['target_id'] != $node->nid) {
-          $new_nids[] = $value;
+    if (!empty($result['node'])) {
+      $nids = array_keys($result['node']);
+      $new_nids = array();
+      foreach ($nids as $nid) {
+        $cnode = node_load($nid);
+        foreach ($cnode->field_os2web_cp_service_doc_ref[LANGUAGE_NONE] as $value) {
+          if ($value['target_id'] != $node->nid) {
+            $new_nids[] = $value;
+          }
         }
+        $cnode->field_os2web_cp_service_doc_ref[LANGUAGE_NONE] = $new_nids;
+        node_save($cnode);
       }
-      $cnode->field_os2web_cp_service_doc_ref[LANGUAGE_NONE] = $new_nids;
-      node_save($cnode);
     }
   }
 }
@@ -878,6 +879,18 @@ function os2web_cp_service_form_os2web_settings_settings_form_alter(&$form, &$fo
     '#title' => 'Besked til brugeren, hvis fil ikke er tilgængelig.',
     '#description' => 'Vises når den modtagede filtype ikke er godkendt til Download.',
     '#default_value' => variable_get('os2web_cp_service_access_denied_message'),
+  );
+  $form['os2web_cp_service_config_group']['os2web_cp_service_disallow_mimes'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Filers MIME type, som ikke må downloades af brugere.',
+    '#description' => 'Tillad kun filer som ikke har disse mimes. Seperer mimes med komma. Standard:.msg',
+    '#default_value' => variable_get('os2web_cp_service_disallow_mimes'),
+  );
+  $form['os2web_cp_service_config_group']['os2web_cp_service_disallow_mimes_exceptions'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Sager hvor ALLE mimes er tilladt.',
+    '#description' => 'Tillad brugere at hente ALLE mime typer på angivende sager. Seperer sager med komma.',
+    '#default_value' => variable_get('os2web_cp_service_disallow_mimes_exceptions'),
   );
 }
 
