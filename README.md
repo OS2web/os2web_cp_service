@@ -1,3 +1,9 @@
+Deprecated
+==========
+This repository is deprecated, and may me delted.
+
+Use <https://github.com/OS2WebCore/os2web_cp_service>
+
 OS2Web Case Publishing service
 ==============================
 
