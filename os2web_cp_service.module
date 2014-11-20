@@ -27,6 +27,25 @@ function os2web_cp_service_init() {
 function os2web_cp_service_menu() {
   $items = array();
 
+  $items['admin/config/os2web_cp_service'] = array(
+    'title' => 'OS2Web CP Service',
+    'position' => 'right',
+    'weight' => -15,
+    'access arguments' => array('administer os2web'),
+    'page callback' => 'system_admin_menu_block_page',
+    'file' => 'system.admin.inc',
+    'file path' => drupal_get_path('module', 'system'),
+  );
+
+  $items['admin/config/os2web_cp_service/settings'] = array(
+    'title' => 'Settings',
+    'description' => 'Configure OS2Web CP Service',
+    'access arguments' => array('administer os2web'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('os2web_cp_service_settings'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
   $items['os2web/service/cp/v1'] = array(
     'type' => MENU_CALLBACK,
     'page callback' => 'os2web_cp_service_handler',
@@ -850,7 +869,8 @@ function os2web_cp_service_theme_registry_alter(&$theme_registry) {
  *
  * Add configuration to the settings form.
  */
-function os2web_cp_service_form_os2web_settings_settings_form_alter(&$form, &$form_state) {
+function os2web_cp_service_settings() {
+  $form = array();
   // CP Configuration.
   $form['os2web_cp_service_config_group'] = array(
     '#type' => 'fieldset',
@@ -892,6 +912,7 @@ function os2web_cp_service_form_os2web_settings_settings_form_alter(&$form, &$fo
     '#description' => 'Tillad brugere at hente ALLE mime typer på angivende sager. Seperer sager med komma.',
     '#default_value' => variable_get('os2web_cp_service_disallow_mimes_exceptions'),
   );
+  return system_settings_form($form);
 }
 
 /**
